@@ -2,4 +2,4 @@ Geography: Yarn
 Species: Cat
 Religion: Apple
 Military: Cake
-Villain: Shitty
+Villain: Kitty

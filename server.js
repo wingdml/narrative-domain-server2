@@ -1,0 +1,5 @@
+Geography: Yarn
+Species: Cat
+Religion: Apple
+Military: Cake
+Villain: Masked Dog

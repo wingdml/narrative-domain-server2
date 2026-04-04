@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Narrative Game Settings</title>
+</head>
+<body>
+    <h1>Game Variables</h1>
+    <form id="settingForm">
+        <textarea id="settings" rows="10" cols="50"></textarea><br>
+        <button type="submit">Update Settings</button>
+    </form>
+    <button onclick="loadSettings()">Reload Settings</button>
+    <script>
+        const API_URL = "https://narrative-domain-server2.onrender.com/api/settings";
+
+        function loadSettings() {
+            fetch(API_URL)
+              .then(r => r.json())
+              .then(data => {
+                  document.getElementById('settings').value = data.content;
+              });
+        }
+
+        document.getElementById('settingForm').addEventListener('submit', function(event){
+            event.preventDefault();
+            fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: document.getElementById('settings').value })
+            }).then(loadSettings);
+        });
+
+        loadSettings();
+    </script>
+</body>
+</html>

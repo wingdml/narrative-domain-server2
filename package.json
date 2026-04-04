@@ -1,5 +1,5 @@
 {
-  "name": "narrative-domain-server",
+  "name": "narrative-domain-server2",
   "version": "1.0.0",
   "main": "server.js",
   "dependencies": {

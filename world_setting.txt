@@ -1,5 +1,5 @@
-Geography: Yarn
-Species: Cat
-Religion: Apple
-Military: Cake
-Villain: Kittyjjjjjjjjjjj
+Geography: changefromserver1
+Species: changefromserver1
+Religion: changefromserver1
+Military: changefromserver1
+Villain: changefromserver1

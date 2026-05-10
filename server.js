@@ -6,6 +6,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(__dirname));
 
 const FILE_PATH_PRIMARY = path.join(__dirname, 'World_Setting.txt');
 const FILE_PATH_FALLBACK = path.join(__dirname, 'world_setting.txt');
@@ -49,6 +50,47 @@ function cleanupStalePlayers(sessionId) {
   }
 }
 
+function cleanupAllStalePlayers() {
+  for (const sessionId of Array.from(multiplayerSessions.keys())) {
+    cleanupStalePlayers(sessionId);
+  }
+}
+
+function getMultiplayerStats() {
+  cleanupAllStalePlayers();
+
+  const sessions = [];
+  let activePlayers = 0;
+  for (const [sessionId, session] of multiplayerSessions.entries()) {
+    const players = [];
+    for (const state of session.values()) {
+      players.push({
+        player_name: state.player_name,
+        is_npc: Boolean(state.is_npc),
+        location: state.location || 'HALL',
+        location_detail: state.location_detail || '',
+        timestamp: Number.isFinite(Number(state.timestamp)) ? Number(state.timestamp) : nowSeconds(),
+      });
+    }
+    activePlayers += players.length;
+    sessions.push({
+      session_id: sessionId,
+      player_count: players.length,
+      players,
+    });
+  }
+
+  return {
+    active_sessions: sessions.length,
+    active_players: activePlayers,
+    sessions,
+  };
+}
+
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // GET endpoint for the world setting
 app.get('/api/world_setting', (req, res) => {
   fs.readFile(FILE_PATH, 'utf8', (err, txt) => {
@@ -68,6 +110,20 @@ app.get('/api/settings', (req, res) => {
     } else {
       res.json({ content: txt });
     }
+  });
+});
+
+app.get('/api/status', (req, res) => {
+  fs.readFile(FILE_PATH, 'utf8', (err, txt) => {
+    const worldContent = err ? '' : txt;
+    res.json({
+      status: 'ok',
+      server_time_unix: nowSeconds(),
+      uptime_seconds: process.uptime(),
+      world_setting_file: path.basename(FILE_PATH),
+      world_content: worldContent,
+      multiplayer: getMultiplayerStats(),
+    });
   });
 });
 
@@ -176,6 +232,10 @@ app.get(`${MULTIPLAYER_API_PATH}/get_players`, (req, res) => {
   }
 
   return res.json({ players });
+});
+
+app.get(`${MULTIPLAYER_API_PATH}/stats`, (_req, res) => {
+  return res.json(getMultiplayerStats());
 });
 
 // Remove player from session when exiting game.

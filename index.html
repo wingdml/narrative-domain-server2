@@ -1,36 +1,135 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Narrative Game Settings</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Narrative Server Dashboard</title>
+    <style>
+        body {
+            font-family: Segoe UI, Tahoma, sans-serif;
+            margin: 20px;
+            background: #f7f9fc;
+            color: #1f2937;
+        }
+        h1 { margin-bottom: 8px; }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+        .card {
+            background: #fff;
+            border: 1px solid #d7dee8;
+            border-radius: 10px;
+            padding: 12px;
+            min-width: 220px;
+        }
+        textarea {
+            width: 100%;
+            max-width: 900px;
+            min-height: 180px;
+            border-radius: 8px;
+            border: 1px solid #c8d0da;
+            padding: 10px;
+            font-family: Consolas, monospace;
+            box-sizing: border-box;
+            background: #fff;
+        }
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            background: #1459c7;
+            color: #fff;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        button.secondary { background: #4b5563; }
+        .session {
+            border: 1px solid #d7dee8;
+            background: #fff;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+        }
+        .muted { color: #6b7280; font-size: 13px; }
+        code { background: #eef2f8; padding: 2px 5px; border-radius: 4px; }
+    </style>
 </head>
 <body>
-    <h1>Game Variables</h1>
-    <form id="settingForm">
-        <textarea id="settings" rows="10" cols="50"></textarea><br>
-        <button type="submit">Update Settings</button>
-    </form>
-    <button onclick="loadSettings()">Reload Settings</button>
-    <script>
-        const API_URL = "https://narrative-domain-server2.onrender.com/api/settings";
+    <h1>Narrative Server Dashboard</h1>
+    <p class="muted">This page shows world settings and live multiplayer status from this server.</p>
 
-        function loadSettings() {
-            fetch(API_URL)
-              .then(r => r.json())
-              .then(data => {
-                  document.getElementById('settings').value = data.content;
-              });
+    <div class="row">
+        <div class="card"><strong>Active Sessions</strong><div id="activeSessions">0</div></div>
+        <div class="card"><strong>Active Players</strong><div id="activePlayers">0</div></div>
+        <div class="card"><strong>Uptime (sec)</strong><div id="uptime">0</div></div>
+    </div>
+
+    <div style="margin-bottom: 10px;">
+        <button id="reloadBtn">Reload</button>
+        <button id="saveBtn" class="secondary">Save World Settings</button>
+    </div>
+
+    <h2>World Settings</h2>
+    <textarea id="settings" spellcheck="false"></textarea>
+
+    <h2>Multiplayer Sessions</h2>
+    <div id="sessions"></div>
+
+    <script>
+        const SETTINGS_API = '/api/settings';
+        const STATUS_API = '/api/status';
+
+        async function loadDashboard() {
+            const [settingsResp, statusResp] = await Promise.all([
+                fetch(SETTINGS_API),
+                fetch(STATUS_API)
+            ]);
+
+            const settings = await settingsResp.json();
+            const status = await statusResp.json();
+
+            document.getElementById('settings').value = settings.content || '';
+            document.getElementById('activeSessions').textContent = String(status.multiplayer?.active_sessions || 0);
+            document.getElementById('activePlayers').textContent = String(status.multiplayer?.active_players || 0);
+            document.getElementById('uptime').textContent = String(Math.floor(status.uptime_seconds || 0));
+
+            const sessionsRoot = document.getElementById('sessions');
+            sessionsRoot.innerHTML = '';
+            const sessions = (status.multiplayer && status.multiplayer.sessions) || [];
+            if (!sessions.length) {
+                sessionsRoot.innerHTML = '<p class="muted">No active multiplayer sessions.</p>';
+                return;
+            }
+
+            sessions.forEach(session => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'session';
+                const playersHtml = (session.players || []).map(p => {
+                    const npcTag = p.is_npc ? 'NPC' : 'PLAYER';
+                    return `<li><code>${p.player_name}</code> [${npcTag}] at <code>${p.location}</code> - ${p.location_detail || ''}</li>`;
+                }).join('');
+                wrapper.innerHTML = `
+                    <div><strong>Session:</strong> <code>${session.session_id}</code></div>
+                    <div class="muted">Players: ${session.player_count}</div>
+                    <ul>${playersHtml}</ul>
+                `;
+                sessionsRoot.appendChild(wrapper);
+            });
         }
 
-        document.getElementById('settingForm').addEventListener('submit', function(event){
-            event.preventDefault();
-            fetch(API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: document.getElementById('settings').value })
-            }).then(loadSettings);
-        });
+        async function saveSettings() {
+            const content = document.getElementById('settings').value;
+            await fetch(SETTINGS_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content })
+            });
+            await loadDashboard();
+        }
 
-        loadSettings();
+        document.getElementById('reloadBtn').addEventListener('click', loadDashboard);
+        document.getElementById('saveBtn').addEventListener('click', saveSettings);
+
+        loadDashboard();
+        setInterval(loadDashboard, 3000);
     </script>
 </body>
 </html>

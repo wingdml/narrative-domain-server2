@@ -104,6 +104,10 @@ function saveTotalPlayersEver(value) {
 
 let totalPlayersEver = loadTotalPlayersEver();
 
+function nowSeconds() {
+  return Date.now() / 1000;
+}
+
 function loadWorldSettingHistory() {
   try {
     if (!fs.existsSync(WORLD_SETTING_HISTORY_FILE)) {

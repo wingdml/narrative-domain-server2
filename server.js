@@ -28,6 +28,7 @@ const DATA_DIR = resolveDataDir();
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const FILE_PATH = path.join(DATA_DIR, 'world_setting.txt');
+const WORLD_SETTING_HISTORY_FILE = path.join(DATA_DIR, 'world_setting_history.json');
 
 const MULTIPLAYER_API_PATH = '/api/multiplayer';
 const PLAYER_STALE_SECONDS = 90;
@@ -103,8 +104,52 @@ function saveTotalPlayersEver(value) {
 
 let totalPlayersEver = loadTotalPlayersEver();
 
-function nowSeconds() {
-  return Date.now() / 1000;
+function loadWorldSettingHistory() {
+  try {
+    if (!fs.existsSync(WORLD_SETTING_HISTORY_FILE)) {
+      return { updates: [] };
+    }
+    const raw = fs.readFileSync(WORLD_SETTING_HISTORY_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed || { updates: [] };
+  } catch (_err) {
+    return { updates: [] };
+  }
+}
+
+function saveWorldSettingHistory(history) {
+  const payload = {
+    updates: Array.isArray(history.updates) ? history.updates : [],
+  };
+  writeJsonAtomic(WORLD_SETTING_HISTORY_FILE, payload);
+}
+
+function recordWorldSettingUpdate(playerName, oldContent, newContent) {
+  const history = loadWorldSettingHistory();
+  const entry = {
+    player_name: playerName || 'unknown',
+    timestamp_unix: nowSeconds(),
+    timestamp_iso: new Date().toISOString(),
+    old_content_lines: (oldContent || '').split('\n').length,
+    new_content_lines: (newContent || '').split('\n').length,
+  };
+  if (!history.updates) {
+    history.updates = [];
+  }
+  history.updates.push(entry);
+  // Keep only last 50 updates
+  if (history.updates.length > 50) {
+    history.updates = history.updates.slice(-50);
+  }
+  saveWorldSettingHistory(history);
+}
+
+function getWorldSettingLastUpdatedBy() {
+  const history = loadWorldSettingHistory();
+  if (history.updates && history.updates.length > 0) {
+    return history.updates[history.updates.length - 1];
+  }
+  return null;
 }
 
 function getSessionMap(sessionId) {
@@ -182,7 +227,11 @@ app.get('/api/world_setting', (req, res) => {
     if (err) {
       res.status(500).json({error: 'Could not read world setting file'});
     } else {
-      res.json({ content: txt });
+      const lastUpdate = getWorldSettingLastUpdatedBy();
+      res.json({ 
+        content: txt,
+        last_updated_by: lastUpdate 
+      });
     }
   });
 });
@@ -193,7 +242,11 @@ app.get('/api/settings', (req, res) => {
     if (err) {
       res.status(500).json({ error: 'Could not read world setting file' });
     } else {
-      res.json({ content: txt });
+      const lastUpdate = getWorldSettingLastUpdatedBy();
+      res.json({ 
+        content: txt,
+        last_updated_by: lastUpdate 
+      });
     }
   });
 });
@@ -201,6 +254,7 @@ app.get('/api/settings', (req, res) => {
 app.get('/api/status', (req, res) => {
   fs.readFile(FILE_PATH, 'utf8', (err, txt) => {
     const worldContent = err ? '' : txt;
+    const lastUpdate = getWorldSettingLastUpdatedBy();
     res.json({
       status: 'ok',
       server_time_unix: nowSeconds(),
@@ -208,6 +262,7 @@ app.get('/api/status', (req, res) => {
       data_dir: DATA_DIR,
       world_setting_file: path.basename(FILE_PATH),
       world_content: worldContent,
+      world_setting_last_updated_by: lastUpdate,
       total_players_ever: totalPlayersEver,
       multiplayer: getMultiplayerStats(),
     });
@@ -238,13 +293,31 @@ app.post('/api/player_counter/reset', (_req, res) => {
   return res.json({ status: 'ok', total_players_ever: totalPlayersEver });
 });
 
+// GET world setting change history
+app.get('/api/world_setting/history', (_req, res) => {
+  const history = loadWorldSettingHistory();
+  return res.json(history);
+});
+
 // POST endpoint to update the world setting
 app.post('/api/world_setting', (req, res) => {
   const newTxt = req.body.content;
+  const playerName = req.body.player_name || 'unknown';
   if (typeof newTxt !== 'string') return res.status(400).json({ error: 'No content' });
   try {
+    // Read old content before writing
+    let oldTxt = '';
+    try {
+      oldTxt = fs.readFileSync(FILE_PATH, 'utf8');
+    } catch (_err) {
+      oldTxt = '';
+    }
+    // Write new content
     writeTextAtomic(FILE_PATH, newTxt);
-    res.json({ status: 'ok' });
+    // Record the update
+    recordWorldSettingUpdate(playerName, oldTxt, newTxt);
+    const lastUpdate = getWorldSettingLastUpdatedBy();
+    res.json({ status: 'ok', last_updated_by: lastUpdate });
   } catch (err) {
     res.status(500).json({ error: 'Failed to write world setting file' });
   }
@@ -253,10 +326,22 @@ app.post('/api/world_setting', (req, res) => {
 // Legacy alias used by older tooling/UI.
 app.post('/api/settings', (req, res) => {
   const newTxt = req.body.content;
+  const playerName = req.body.player_name || 'unknown';
   if (typeof newTxt !== 'string') return res.status(400).json({ error: 'No content' });
   try {
+    // Read old content before writing
+    let oldTxt = '';
+    try {
+      oldTxt = fs.readFileSync(FILE_PATH, 'utf8');
+    } catch (_err) {
+      oldTxt = '';
+    }
+    // Write new content
     writeTextAtomic(FILE_PATH, newTxt);
-    res.json({ status: 'ok' });
+    // Record the update
+    recordWorldSettingUpdate(playerName, oldTxt, newTxt);
+    const lastUpdate = getWorldSettingLastUpdatedBy();
+    res.json({ status: 'ok', last_updated_by: lastUpdate });
   } catch (err) {
     res.status(500).json({ error: 'Failed to write world setting file' });
   }

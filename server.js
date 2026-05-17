@@ -31,7 +31,8 @@ const FILE_PATH = path.join(DATA_DIR, 'world_setting.txt');
 const WORLD_SETTING_HISTORY_FILE = path.join(DATA_DIR, 'world_setting_history.json');
 
 const MULTIPLAYER_API_PATH = '/api/multiplayer';
-const PLAYER_STALE_SECONDS = 90;
+const PLAYER_STALE_SECONDS = Number.parseInt(process.env.PLAYER_STALE_SECONDS || '20', 10);
+const STALE_CLEANUP_INTERVAL_MS = Number.parseInt(process.env.STALE_CLEANUP_INTERVAL_MS || '2000', 10);
 const PLAYER_COUNTER_FILE = path.join(DATA_DIR, 'player_counter.json');
 
 // session_id -> Map(player_name -> playerState)
@@ -188,6 +189,18 @@ function cleanupAllStalePlayers() {
   for (const sessionId of Array.from(multiplayerSessions.keys())) {
     cleanupStalePlayers(sessionId);
   }
+}
+
+// Run stale cleanup in the background so stale users are removed even without stats polling.
+const staleCleanupTimer = setInterval(() => {
+  try {
+    cleanupAllStalePlayers();
+  } catch (_err) {
+    // ignore periodic cleanup errors
+  }
+}, Math.max(500, STALE_CLEANUP_INTERVAL_MS));
+if (typeof staleCleanupTimer.unref === 'function') {
+  staleCleanupTimer.unref();
 }
 
 function getMultiplayerStats() {
@@ -389,6 +402,7 @@ app.post(`${MULTIPLAYER_API_PATH}/update_location`, (req, res) => {
     client_id: clientId,
     location,
     location_detail: locationDetail = '',
+    is_npc: isNpc,
     timestamp,
   } = req.body || {};
 
@@ -404,7 +418,7 @@ app.post(`${MULTIPLAYER_API_PATH}/update_location`, (req, res) => {
     player_name: playerName,
     client_id: playerKey,
     session_id: sessionId,
-    is_npc: Boolean(prev.is_npc),
+    is_npc: typeof isNpc === 'boolean' ? isNpc : Boolean(prev.is_npc),
     location,
     location_detail: locationDetail,
     timestamp: Number.isFinite(Number(timestamp)) ? Number(timestamp) : nowSeconds(),
@@ -415,10 +429,20 @@ app.post(`${MULTIPLAYER_API_PATH}/update_location`, (req, res) => {
 
 // List players in a session, optionally excluding one player.
 app.get(`${MULTIPLAYER_API_PATH}/get_players`, (req, res) => {
-  const { session_id: sessionId, exclude, exclude_client_id: excludeClientId } = req.query || {};
+  const {
+    session_id: sessionId,
+    exclude,
+    exclude_client_id: excludeClientId,
+    viewer_is_npc: viewerIsNpcRaw,
+    include_all: includeAllRaw,
+  } = req.query || {};
   if (!sessionId) {
     return res.status(400).json({ error: 'session_id is required' });
   }
+
+  const viewerIsNpc = String(viewerIsNpcRaw || '').toLowerCase();
+  const includeAll = String(includeAllRaw || '').toLowerCase();
+  const viewerCanSeeAll = includeAll === '1' || includeAll === 'true' || viewerIsNpc === '1' || viewerIsNpc === 'true';
 
   cleanupStalePlayers(sessionId);
   const session = multiplayerSessions.get(sessionId);
@@ -432,6 +456,10 @@ app.get(`${MULTIPLAYER_API_PATH}/get_players`, (req, res) => {
       continue;
     }
     if (exclude && state.player_name === exclude) {
+      continue;
+    }
+    if (!viewerCanSeeAll && !Boolean(state.is_npc)) {
+      // Default safety: non-NPC viewers only receive NPC players.
       continue;
     }
     players.push({
@@ -461,7 +489,15 @@ app.post(`${MULTIPLAYER_API_PATH}/unregister`, (req, res) => {
   const session = multiplayerSessions.get(sessionId);
   if (session) {
     const playerKey = (typeof clientId === 'string' && clientId.trim()) ? clientId.trim() : playerName;
-    session.delete(playerKey);
+    const removedDirect = session.delete(playerKey);
+    if (!removedDirect) {
+      // Fallback for client-id/key mismatches: remove all entries owned by this player name.
+      for (const [key, state] of session.entries()) {
+        if ((state.player_name || '').toLowerCase() === String(playerName).toLowerCase()) {
+          session.delete(key);
+        }
+      }
+    }
     if (session.size === 0) {
       multiplayerSessions.delete(sessionId);
     }
